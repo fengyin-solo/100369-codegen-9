@@ -3,9 +3,10 @@
     <header class="page-head">
       <div>
         <h2>物资储备管理</h2>
-        <p class="page-desc">维护防火物资，围绕物资编号、物资名称、物资类别、规格型号做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护防火物资库存；确认火情时按火势等级自动扣减库存并在台账新增处置调拨项。</p>
       </div>
       <div class="page-actions">
+        <RouterLink class="btn" to="/allocation">打开调拨台账</RouterLink>
         <button class="btn primary" type="button" @click="openCreate">登记防火物资</button>
         <button class="btn" type="button" @click="exportRows">导出物资储备清单</button>
       </div>
@@ -25,6 +26,13 @@
     </p>
 
     <form class="filter-bar" @submit.prevent="reload">
+      <label class="filter-item">
+        <span>储备林场</span>
+        <select v-model="filters['储备林场']">
+          <option value="">全部林场</option>
+          <option v-for="farm in farms" :key="farm" :value="farm">{{ farm }}</option>
+        </select>
+      </label>
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
         <input v-model="filters[field]" :placeholder="`按${field}检索`" />
@@ -58,7 +66,26 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无物资储备数据，可先登记防火物资</td>
+          <td :colspan="columns.length + 2" class="empty-state">暂无物资储备数据</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="ledger-title">物资调拨台账（火情处置同步项，最近 {{ allocRows.length }} 条）</h3>
+    <table class="data-table ledger-table">
+      <thead>
+        <tr>
+          <th v-for="column in allocColumns" :key="column">{{ column }}</th>
+          <th>台账状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="row in allocRows" :key="String(row.id)">
+          <td v-for="column in allocColumns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td>{{ row.status }}</td>
+        </tr>
+        <tr v-if="!allocRows.length">
+          <td :colspan="allocColumns.length + 1" class="empty-state">暂无调拨记录</td>
         </tr>
       </tbody>
     </table>
@@ -75,32 +102,45 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   downloadEntries,
-  listEntries,
+  filterRows,
+  listRows,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { FOREST_FARMS } from '@/data/seed'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('supply')
-const columns = ["物资编号", "物资名称", "物资类别", "规格型号", "储备林场", "预警储备量", "实际储备量", "物资状态"]
+const columns = ["物资编号", "物资名称", "物资类别", "规格型号", "储备林场", "计量单位", "预警储备量", "实际储备量", "物资状态"]
 const actions = ["发起补充", "确认补充", "标记过期"]
 const statuses = ["充足", "偏低", "需补充", "已过期"]
-const stats = [{"label": "物资种类", "value": 0}, {"label": "需补充种类", "value": 0}, {"label": "过期种类", "value": 0}]
+const allocColumns = ["调拨单号", "关联火情编号", "储备林场", "物资名称", "计量单位", "调拨数量", "火势等级", "调拨时间"]
+const farms = FOREST_FARMS
 
 const rows = ref<EntryRow[]>([])
+const allocRows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+const filters = ref<Record<string, string>>({ '储备林场': '' })
+const filterFields = ["物资名称", "物资类别"]
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+const stats = computed(() => [
+  { label: '物资种类', value: rows.value.length },
+  { label: '需补充种类', value: rows.value.filter((row) => String(row.status) === '需补充').length },
+  {
+    label: '待出库调拨',
+    value: allocRows.value.filter((row) => String(row.status) === '待出库').length,
+  },
+])
 
 function resetFilters() {
-  filters.value = {}
+  filters.value = { '储备林场': '' }
   reload()
 }
 
@@ -124,14 +164,24 @@ function runAction(action: string, row: EntryRow) {
 
 function reload() {
   errorMessage.value = ''
-  try {
-    const payload = listEntries(meta.key, filters.value)
-    rows.value = payload.items
-    total.value = payload.total
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '物资储备列表读取失败'
+  const active: Record<string, string> = {}
+  for (const [key, value] of Object.entries(filters.value)) {
+    if (value.trim() !== '') {
+      active[key] = value
+    }
   }
+  rows.value = filterRows(listRows(meta.key), active)
+  total.value = rows.value.length
+  allocRows.value = [...listRows('allocation')]
+    .sort((a, b) => Number(b.id) - Number(a.id))
+    .slice(0, 8)
 }
 
 onMounted(reload)
 </script>
+
+<style scoped>
+.ledger-title { font-size: 14px; margin: 18px 0 8px; }
+.ledger-table { font-size: 12px; }
+.filter-item select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; }
+</style>
