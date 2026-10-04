@@ -50,6 +50,7 @@ npm run build
 | 消防装备 | `equipment` | 消防装备 | 装备编号、装备名称、装备类型 |
 | 气象观测 | `weather` | 气象观测记录 | 记录编号、观测站点、观测时间 |
 | 火情报告 | `firereport` | 火情报告 | 报告编号、起火地点、起火时间 |
+| 火情处置看板 | `firedisposal` | 火情报告（按林场分栏） | 所属林场、火势等级、最近处置时间 |
 | 无人机巡查 | `drone` | 无人机巡查任务 | 任务编号、飞行区域、飞行路线 |
 | 防火宣传 | `campaign` | 防火宣传活动 | 活动编号、宣传主题、宣传方式 |
 | 防火检查站 | `checkpoint` | 防火检查站 | 站点编号、站点位置、值守人员 |
@@ -68,4 +69,20 @@ npm run build
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
+- 火情处置看板（`/firedisposal`）按林场列出待核实、已确认、已出警、已扑灭报告：报告来源与
+  现场核实结果冲突时采信现场核实结果；历史缺过火面积按火势等级区间（一般 0.1–1、较大 1–100、
+  重大 100–1000、特别重大 1000–5000 公顷）回填并落库。
+- 确认火情（核实火情动作）在一个事务里同时生成扑火队伍出动待办（顺所属林场找在营待命队伍）、
+  防火物资调拨清单（物资台账新增处置项）和无人机巡查任务；任一创建失败整体回退，重复确认
+  同一火情只生效一次、不产生重复任务。
 - 想回到初始数据：清掉浏览器里 `forest-fire-patrol:entries` 这一项，或调用 `resetModule(模块)`。
+
+## 冒烟验证
+
+`frontend/test/smoke.mts` 覆盖了看板分组、面积回填、冲突采信、确认联动、幂等与回退：
+
+```bash
+cd frontend
+npx tsc -p tsconfig.smoke.json
+node --loader ./test/alias-loader.mjs /tmp/smoke-out/test/smoke.mjs
+```
